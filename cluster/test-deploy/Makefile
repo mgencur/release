@@ -5,7 +5,7 @@ export INSTANCE_PREFIX
 export TYPE
 
 # Select RPMs based on branch or tag
-REF ?= "v4.0"
+REF ?= v3.11
 LATEST = "https://rpms.svc.ci.openshift.org/openshift-origin-$(REF)/"
 REPO ?= $(LATEST)
 
