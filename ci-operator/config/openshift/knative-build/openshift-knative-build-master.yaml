@@ -10,7 +10,8 @@ base_images:
     tag: base
 build_root:
   project_image:
-    dockerfile_path: openshift/ci-operator/build-image/Dockerfile
+    dockerfile_path: Dockerfile
+    context_dir: openshift/ci-operator/build-image/
 canonical_go_repository: github.com/knative/build
 tests:
 - as: e2e
