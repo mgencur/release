@@ -63,6 +63,14 @@ images:
       - destination_dir: .
         source_path: /go/bin/autoscale
   to: knative-serving-test-autoscale
+- dockerfile_path: openshift/ci-operator/knative-test-images/autoscale/Dockerfile
+  from: test-bin
+  inputs:
+    test-bin:
+      paths:
+      - destination_dir: .
+        source_path: /go/bin/autoscale
+  to: knative-serving-test-autoscale2
 - dockerfile_path: openshift/ci-operator/knative-test-images/controller/Dockerfile
   from: test-bin
   inputs:
