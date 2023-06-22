@@ -115,8 +115,6 @@ tests:
     cluster_profile: aws-cspi-qe
     env:
       BASE_DOMAIN: cspilp.interop.ccitredhat.com
-      HYPERSHIFT_BASE_DOMAIN: cspilp.interop.ccitredhat.com
-      HYPERSHIFT_NODE_COUNT: "4"
       FIREWATCH_CONFIG: |
         [
           {"step": "aws-*", "failure_type": "all", "classification": "Infrastructure AWS", "jira_project": "LPTOCPCI"},
@@ -127,6 +125,8 @@ tests:
         ]
       FIREWATCH_DEFAULT_JIRA_PROJECT: LPTOCPCI
       FIREWATCH_JIRA_SERVER: https://issues.redhat.com
+      HYPERSHIFT_BASE_DOMAIN: cspilp.interop.ccitredhat.com
+      HYPERSHIFT_NODE_COUNT: "4"
       OCM_LOGIN_ENV: staging
       OPENSHIFT_VERSION: "4.13"
       REGION: us-west-2
@@ -186,4 +186,4 @@ zz_generated_metadata:
   branch: main
   org: openshift-knative
   repo: serverless-operator
-  variant: 4.13-hypershift
+  variant: 4.13-hypershift-lp-interop
