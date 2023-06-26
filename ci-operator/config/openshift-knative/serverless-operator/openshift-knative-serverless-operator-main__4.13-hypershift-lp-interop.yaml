@@ -2,11 +2,15 @@ base_images:
   base:
     name: "4.13"
     namespace: ocp
-    tag: base
+    tag: ansible
   cli:
     name: "4.13"
     namespace: ocp
     tag: cli
+  dev-scripts:
+    name: test
+    namespace: ocp-kni
+    tag: dev-scripts
   hypershift-operator:
     name: "4.14"
     namespace: ocp
@@ -31,6 +35,22 @@ base_images:
     name: release
     namespace: openshift
     tag: golang-1.19
+  openstack-installer:
+    name: "4.13"
+    namespace: ocp
+    tag: openstack-installer
+  tests-private:
+    name: tests-private
+    namespace: ci
+    tag: "4.13"
+  tests-private-ui:
+    name: tests-private-ui
+    namespace: ci
+    tag: "4.13"
+  tools:
+    name: "4.13"
+    namespace: ocp
+    tag: tools
   upi-installer:
     name: "4.13"
     namespace: ocp
@@ -117,11 +137,15 @@ tests:
       BASE_DOMAIN: cspilp.interop.ccitredhat.com
       FIREWATCH_CONFIG: |
         [
+          {"step": "install-operators", "failure_type": "all", "classification": "Infrastructure Provisioning - Operators", "jira_project": "LPTOCPCI"},
+          {"step": "cucushift-hypershift-*", "failure_type": "all", "classification": "Cluster Health Check", "jira_project": "LPTOCPCI"},
           {"step": "aws-*", "failure_type": "all", "classification": "Infrastructure AWS", "jira_project": "LPTOCPCI"},
           {"step": "gather-*", "failure_type": "all", "classification": "Other", "jira_project": "LPTOCPCI"},
           {"step": "osd-*", "failure_type": "all", "classification": "User Setup", "jira_project": "LPTOCPCI"},
           {"step": "rosa-", "failure_type": "all", "classification":  "Cluster Creation", "jira_project": "LPTOCPCI"},
-          {"step": "sbo-", "failure_type": "all", "classification":  "Test Failure", "jira_project": "APPSVC"}
+          {"step": "knative-eventing-kafka-broker-e2e", "failure_type": "test_failure", "classification": "Test Failure", "jira_project": "SRVCOM", "jira_epic": "LPTOCPCI-290"},
+          {"step": "knative-serving-eventing-e2e", "failure_type": "test_failure", "classification": "Test Failure", "jira_project": "SRVCOM", "jira_epic": "LPTOCPCI-290"},
+          {"step": "operator-e2e", "failure_type": "test_failure", "classification": "Test Failure", "jira_project": "SRVCOM", "jira_epic": "LPTOCPCI-290"}
         ]
       FIREWATCH_DEFAULT_JIRA_PROJECT: LPTOCPCI
       FIREWATCH_JIRA_SERVER: https://issues.redhat.com
