@@ -39,8 +39,15 @@
         - network-observability-operator
     - org: openshift-knative
       repos:
+        - eventing-hyperfoil-benchmark
+        - eventing
+        - eventing-istio
         - eventing-kafka
+        - eventing-kafka-broker
+        - net-istio
+        - net-kourier
         - serverless-operator
+        - serving
     - org: openshift-kni
       repos:
         - baremetal-deploy
