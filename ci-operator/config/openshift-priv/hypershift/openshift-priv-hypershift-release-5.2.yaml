@@ -19,10 +19,14 @@ base_images:
     name: test
     namespace: ocp-kni
     tag: dev-scripts
-  hypershift-operator-init:
+  hypershift-operator:
     name: hypershift-operator
     namespace: hypershift
     tag: latest
+  hypershift-operator-52-latest:
+    name: hypershift-operator
+    namespace: hypershift
+    tag: "5.2"
   manila-csi-driver-operator-test:
     name: "5.2"
     namespace: ocp-priv
@@ -39,7 +43,7 @@ images:
   items:
   - additional_architectures:
     - arm64
-    to: hypershift-operator
+    to: hypershift-operator-pr
   - additional_architectures:
     - arm64
     dockerfile_path: Dockerfile.control-plane
@@ -56,19 +60,26 @@ images:
   - additional_architectures:
     - arm64
     dockerfile_literal: |
-      FROM hypershift-operator
+      FROM hypershift-operator-pr
       RUN yum install -y jq && yum clean all
-    from: hypershift-operator
+    from: hypershift-operator-pr
     to: hypershift-cli
 promotion:
   to:
   - excluded_images:
     - custom-verify-src
     - hypershift-cli
-    - hypershift-operator
+    - hypershift-operator-pr
     - hypershift-tests
     name: "5.2"
     namespace: ocp-priv
+  - additional_images:
+      hypershift-operator: hypershift-operator-pr
+    disabled: true
+    excluded_images:
+    - '*'
+    namespace: hypershift
+    tag: "5.2"
 prowgen:
   enable_secrets_store_csi_driver: true
   private: true
@@ -394,7 +405,8 @@ tests:
   steps:
     cluster_profile: hypershift-aws
     dependencies:
-      HYPERSHIFT_RELEASE_LATEST: hypershift-operator-init
+      CI_HYPERSHIFT_OPERATOR: hypershift-operator-pr
+      HYPERSHIFT_RELEASE_LATEST: hypershift-operator-52-latest
     env:
       CI_TESTS_RUN: ^TestUpgradeHyperShiftOperator$
       INSTALL_FROM_LATEST: "true"
