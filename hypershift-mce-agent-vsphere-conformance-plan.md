@@ -12,7 +12,7 @@ This is an implementation proposal, not an already validated combination of CI e
 
 1. **Management cluster topology.** The existing manual workflow uses dev-scripts to install management nodes in libvirt VMs on a leased baremetal host. If the requirement is management nodes installed directly on physical servers, use the management provisioning from the baremetal-lab workflow instead. Resolve this before selecting the job's cluster profile and provisioning chain.
 2. **Network placement.** Select a management environment and vSphere allocation with a verified connectivity path. Do not assume that the existing CI-side Squid proxy makes management endpoints reachable from vSphere VMs.
-3. **Infrastructure allocation.** Decide how to acquire and release vSphere capacity alongside the management allocation. The existing VCM step is gated on `CLUSTER_PROFILE_NAME=vsphere-elastic`; it cannot simply be inserted into the existing management-profile workflow unchanged.
+3. **Infrastructure allocation.** Keep the management CI/Boskos lease and vSphere capacity allocation distinct. The existing VCM step is gated on `CLUSTER_PROFILE_NAME=vsphere-elastic`; it cannot simply be inserted into the existing management-profile workflow unchanged. The auxiliary-lease refactor below defines how to support both without repurposing the management lease.
 4. **Initial test scope.** Start with a connected IPv4 environment, one hosted cluster, one NodePool, and a fixed number of x86_64 worker VMs. Defer disconnected, dual-stack, heterogeneous pools, and automatic VM scale-out.
 
 Native vSphere cloud integration and CSI are not automatically provided by this design. Define guest storage separately if required by the selected conformance tests.
@@ -26,6 +26,7 @@ Native vSphere cloud integration and CSI are not automatically provided by this 
 | AgentServiceConfig and HostedCluster creation | [Manual create chain](ci-operator/step-registry/hypershift/mce/agent/manual/create/hypershift-mce-agent-manual-create-chain.yaml) | Retain the relevant creation steps; replace local-network assumptions. |
 | InfraEnv, Agent approval, and NodePool scaling | [Manual worker script](ci-operator/step-registry/hypershift/agent/create/add-worker-manual/hypershift-agent-create-add-worker-manual-commands.sh) | Separate platform-independent operations from libvirt boot commands. |
 | vSphere capacity and connection context | [VCM setup](ci-operator/step-registry/ipi/conf/vsphere/check/vcm/ipi-conf-vsphere-check-vcm-commands.sh) | Adapt for an auxiliary allocation and explicit lease identity. |
+| VCM lease cleanup | [VCM cleanup](ci-operator/step-registry/ipi/deprovision/vsphere/lease/ipi-deprovision-vsphere-lease-commands.sh) | Add auxiliary-lease targeting while retaining the current standalone fallback. |
 | ISO upload, VM creation, and power-on | [vSphere provision script](ci-operator/step-registry/cucushift/agent/vsphere/provision/cucushift-agent-vsphere-provision-commands.sh) | Extract/adapt the `govc` operations only. |
 | Guest tests and diagnostics | `hypershift-mce-agent-info`, `hypershift-conformance`, and existing HCP gather steps | Preserve guest kubeconfig conventions and reuse. |
 
@@ -48,14 +49,17 @@ Deliverable: selected environments and a documented endpoint/connectivity plan. 
 
 Introduce a proposed `hypershift-agent-vsphere-conf` step or chain:
 
-- Preserve the management cluster profile; mount the necessary vSphere credentials explicitly.
-- Reuse the existing leasing/context-generation logic through a parameterized implementation or an adapter appropriate to the chosen CI allocation mechanism.
-- Do not reinterpret a management `LEASED_RESOURCE` as a vSphere network or bypass lease ownership checks.
-- Record the acquired lease, VM folder, network, datastore, MAC addresses, worker IPs, and reserved ingress address for subsequent steps and cleanup.
-- Use a run-specific naming prefix and resource ownership records. Support cleanup after partial setup.
-- Implement matching lease release without relying on the global management profile being `vsphere-elastic`.
+- Preserve the management cluster profile and its `LEASED_RESOURCE`; mount VCM/vCenter credentials explicitly in the steps that need them. Do not reinterpret the management lease as a vSphere allocation or change its lifecycle.
+- Add an opt-in auxiliary allocation input, for example `VCM_ALLOCATION_MODE=guest-workers`, with a positive `VSPHERE_GUEST_WORKER_COUNT`. When `VSPHERE_LEASED_RESOURCE` is supplied, use it as the VCM lease group/ID and allow setup/cleanup even when `CLUSTER_PROFILE_NAME` is not `vsphere-elastic`. Otherwise, preserve the current behavior: `vsphere-elastic` uses `LEASED_RESOURCE`, and other profiles skip VCM setup. Fail clearly when auxiliary mode is requested without its separate lease ID, credentials, or required sizing inputs.
+- Keep three identities separate: management `LEASED_RESOURCE`; the auxiliary CI/Boskos quota slot `VSPHERE_LEASED_RESOURCE`; and the concrete VCM Lease allocation labeled with the auxiliary vSphere ID/group. The CI quota slot controls CI resource concurrency; VCM provides the actual network, pool, and vCenter context. The job-level auxiliary lease declaration is outside this refactor itself and is added in Phase 7, which is required by this conformance plan.
+- In `guest-workers` mode, calculate only the requested worker VMs' resources: `worker count × vCPUs per VM` and `worker count × memory per VM`. Use the same sizing source as the VM provisioner, and ensure the VCM request cannot understate it (round memory up when converting MB to GB). Request one worker network and one vSphere pool unless the design explicitly requires more; do not include control-plane replicas, bootstrap VM, or standalone fallback capacity. Keep the existing standalone capacity formula and overrides unchanged for current users; do not emulate worker-only mode by setting control-plane replicas to zero.
+- Create/reconcile the VCM Lease using the auxiliary ID, worker-only CPU/memory, and required network/pool constraints. Preserve existing context-generation outputs such as `govc.sh`, `vsphere_context.sh`, network/subnet data, and lease metadata. Record VCM Lease names/IDs early, with run/job identity and a hosted-worker purpose, so cleanup can find resources after partial setup.
+- Record the lease, VM folder, network, datastore, MAC addresses, worker IPs, and reserved ingress address for later steps. Use a run-specific naming prefix and ownership records; never put credentials or kubeconfigs in `${ARTIFACT_DIR}`.
+- Make cleanup target `VSPHERE_LEASED_RESOURCE` when present and retain the existing `vsphere-elastic`/`LEASED_RESOURCE` fallback. It must be safe if setup failed partway through or no VCM Lease was created, and must never delete the VCM group associated with the management `LEASED_RESOURCE` when cleaning up auxiliary capacity.
 
 Suggested new shared files are `vsphere-guest-resources.json` and `vsphere-guest-network.json`. Keep cross-step files directly in `${SHARED_DIR}`; do not rely on arbitrary subdirectories being propagated. Never copy credentials or kubeconfigs into `${ARTIFACT_DIR}`.
+
+In Phase 7, declare a distinct CI lease (proposed `vsphere-elastic-quota-slice`, exported as `VSPHERE_LEASED_RESOURCE`) and keep it held through job completion. The management profile remains responsible for management credentials and infrastructure; vSphere credentials are explicitly mounted for the allocation and VM steps. Do not run the legacy VCM sibling that parses the primary `LEASED_RESOURCE` as a vSphere router/datacenter/VLAN value.
 
 ### 3. Retain management and hosted control-plane creation
 
@@ -130,6 +134,8 @@ Retain current defaults for existing libvirt workflows when introducing paramete
 
 ### 7. Assemble the workflow and test job
 
+This is a required phase of the conformance plan. Complete the auxiliary lease refactor and validate the lease, network, and single-worker path before wiring the workflow and job to use it. The lease refactor can be implemented independently; this phase then adds the job-level lease declaration and workflow integration.
+
 The intended sequence is:
 
 ```text
@@ -145,7 +151,7 @@ Provision management cluster and install MCE/storage
   -> Gather diagnostics, destroy guest resources, release both allocations
 ```
 
-Create the new workflow without changing the standalone `cucushift-agent-vsphere-install-ha` workflow's behavior. Add an initial opt-in/rehearsable job in the agreed HyperShift configuration, with the necessary intranet capability, image dependencies, credentials, and declared environment settings.
+Create the new workflow without changing the standalone `cucushift-agent-vsphere-install-ha` workflow's behavior. Add an opt-in/rehearsable job in the agreed HyperShift configuration, with the necessary intranet capability, image dependencies, credentials, auxiliary vSphere lease declaration, and environment settings.
 
 ### 8. Implement failure-safe cleanup
 
@@ -170,6 +176,8 @@ Do not reuse broad network-wide VM deletion unless isolation and ownership are e
 - [ ] Verify guest API, application ingress, and any required storage before conformance.
 - [ ] Run `hypershift-mce-agent-info` and `hypershift-conformance` using the guest kubeconfig.
 - [ ] Rehearse failures during lease acquisition, VM creation, and Agent registration; verify cleanup and diagnostic retention.
+- [ ] Verify auxiliary VCM allocation and cleanup use `VSPHERE_LEASED_RESOURCE` independently from management `LEASED_RESOURCE`; confirm worker-only capacity scales linearly and excludes control-plane/bootstrap capacity.
+- [ ] Verify existing `vsphere-elastic` standalone jobs retain their prior lease identity, capacity formula (including bootstrap), outputs, and cleanup behavior; non-vSphere jobs still skip VCM unless auxiliary mode is explicitly requested.
 - [ ] Verify there are no leftover VMs, ISOs, DNS records, or infrastructure leases after success and failure.
 - [ ] Rehearse the original manual flow if its generic Agent logic or defaults were refactored.
 
