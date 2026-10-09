@@ -37,13 +37,14 @@ Do not concatenate the two complete workflows. The standalone vSphere provision 
 ### 1. Establish networking and resource contracts
 
 - Identify the vSphere pool, portgroup, datastore, VM sizing, and worker address allocation mechanism.
-- Validate connectivity from the selected worker network to management-hosted Assisted Service, image/rootfs services, and the hosted API, ignition, and Konnectivity endpoints. Include DNS, certificates, routing, firewall rules, and any required proxy configuration.
-- Validate worker-to-worker connectivity and access to release images, registries, and configured mirrors.
-- Plan guest ingress exposure and `*.apps` DNS using a reserved address on the vSphere network or an explicitly configured external load balancer.
+- Follow the detailed [vSphere network connectivity plan](2-vsphere-network-connectivity-plan.md) to inventory endpoints and validate connectivity from the actual worker network to Assisted Service, image/rootfs services, hosted API, ignition, and Konnectivity.
+- Choose direct versus Squid-proxied paths for each endpoint. For proxied requests, Squid resolves destination hostnames; worker-side DNS is needed only for direct/`noProxy` traffic, a proxy configured by hostname, or components that do not honor the proxy. Reuse existing DNS answers; creating DNS records is not a baseline requirement, and changes should address only a demonstrated missing or incorrect lookup.
+- Validate certificates, routing, firewall rules, worker-to-worker connectivity, and access to release images, registries, and configured mirrors along the selected paths.
+- Plan guest ingress exposure using a reserved address on the vSphere network or an explicitly configured external load balancer. If tests require guest routes, verify existing `*.apps` resolution and change DNS only if that lookup is missing or incorrect.
 - Confirm that the test runner can access the guest API and ingress.
 - Ensure the guest machine CIDR matches the worker network and that relevant machine, pod, and service networks do not conflict.
 
-Deliverable: selected environments and a documented endpoint/connectivity plan. Resolve missing routes or endpoint publication before attempting the full workflow.
+Deliverable: selected environments and a documented endpoint/connectivity plan, using existing DNS where sufficient. Resolve missing routes or endpoint publication before attempting the full workflow.
 
 ### 2. Add auxiliary vSphere setup and cleanup
 
@@ -92,7 +93,7 @@ Keep libvirt-specific ISO attachment in the existing manual path. If sharing the
 
 For vSphere:
 
-- Create `NMStateConfig` resources for static IPs, gateways, DNS, and NIC MAC mappings when DHCP is not used. Select them through the InfraEnv; do not generate a standalone installer `AgentConfig`.
+- Create `NMStateConfig` resources for static IPs, gateways, and NIC MAC mappings when DHCP is not used. Configure worker DNS resolvers only when required by direct/`noProxy` traffic or a hostname-based proxy, and select the resources through the InfraEnv; do not generate a standalone installer `AgentConfig`.
 - Add a job/pool-specific Agent label and matching NodePool `agentLabelSelector` to avoid claiming unrelated Agents.
 - Wait for `InfraEnv` image creation and download the ISO from `.status.isoDownloadURL`.
 - Ensure the booted environment can reach the service URLs embedded in the image; successful ISO download from the CI pod is not sufficient proof.
@@ -122,13 +123,15 @@ No BareMetalHost or Metal3 resource is required for these manually booted VMs. N
 
 ### 6. Parameterize DNS, endpoint exposure, and ingress
 
-Replace or generalize the local-libvirt assumptions in:
+Use the detailed [vSphere network connectivity plan](2-vsphere-network-connectivity-plan.md) for proxy, DNS, routing, and firewall behavior. Replace or generalize the local-libvirt assumptions in:
 
 - [DNS configuration](ci-operator/step-registry/hypershift/agent/create/config-dns/hypershift-agent-create-config-dns-commands.sh): currently updates the baremetal host's dnsmasq and libvirt network.
 - [Proxy configuration](ci-operator/step-registry/hypershift/agent/create/proxy/hypershift-agent-create-proxy-commands.sh): currently configures CI access through the baremetal host's Squid proxy.
 - [Guest MetalLB configuration](ci-operator/step-registry/hypershift/agent/create/metallb/hypershift-agent-create-metallb-commands.sh): currently uses the dev-scripts address `192.168.111.30` for IPv4 ingress.
 
 Publish hosted control-plane endpoints at addresses reachable from the worker network. Publish guest application ingress separately on the worker side. If retaining MetalLB L2 mode, confirm that the selected vSphere network supports the required address advertisements and reserve a suitable address there.
+
+Verify existing DNS resolution for the endpoints the selected paths actually query. Do not make DNS record creation a workflow prerequisite; add or update a record only when a required lookup is shown to be missing or incorrect, and track cleanup only for records owned by the run.
 
 Retain current defaults for existing libvirt workflows when introducing parameters.
 
@@ -141,12 +144,12 @@ The intended sequence is:
 ```text
 Provision management cluster and install MCE/storage
   -> Acquire auxiliary vSphere capacity and worker networking
-  -> Configure Assisted Service and hosted endpoint DNS/exposure
+  -> Configure Assisted Service and publish hosted endpoints; verify DNS on the selected paths
   -> Create Agent HostedCluster and zero-replica NodePool
   -> Create worker network configuration and InfraEnv
   -> Upload ISO, create vSphere worker VMs, and boot them
   -> Approve Agents, scale NodePool, and wait for workers
-  -> Configure guest ingress/DNS and validate cluster health
+  -> Configure guest ingress and validate required name resolution and cluster health
   -> Run existing hosted-cluster conformance tests
   -> Gather diagnostics, destroy guest resources, release both allocations
 ```
@@ -157,7 +160,7 @@ Create the new workflow without changing the standalone `cucushift-agent-vsphere
 
 - Gather HostedCluster, NodePool, Agent, InfraEnv, guest logs, and vSphere VM diagnostics before removing resources.
 - Destroy the hosted cluster while management remains available.
-- Remove only recorded, run-owned worker VMs, the VM folder, uploaded ISO, and guest DNS/load-balancer resources.
+- Remove only recorded, run-owned worker VMs, the VM folder, uploaded ISO, guest load-balancer resources, and any DNS changes made by this run.
 - Release the vSphere allocation after its resources have been removed.
 - Tear down the management cluster and release its allocation last.
 - Handle partial provisioning and absent files/resources safely. Arrange best-effort post steps so one cleanup failure does not suppress the other cleanup attempts.
@@ -178,7 +181,7 @@ Do not reuse broad network-wide VM deletion unless isolation and ownership are e
 - [ ] Rehearse failures during lease acquisition, VM creation, and Agent registration; verify cleanup and diagnostic retention.
 - [ ] Verify auxiliary VCM allocation and cleanup use `VSPHERE_LEASED_RESOURCE` independently from management `LEASED_RESOURCE`; confirm worker-only capacity scales linearly and excludes control-plane/bootstrap capacity.
 - [ ] Verify existing `vsphere-elastic` standalone jobs retain their prior lease identity, capacity formula (including bootstrap), outputs, and cleanup behavior; non-vSphere jobs still skip VCM unless auxiliary mode is explicitly requested.
-- [ ] Verify there are no leftover VMs, ISOs, DNS records, or infrastructure leases after success and failure.
+- [ ] Verify there are no leftover VMs, ISOs, run-owned DNS changes, or infrastructure leases after success and failure.
 - [ ] Rehearse the original manual flow if its generic Agent logic or defaults were refactored.
 
 Implement incrementally: resolve topology/networking first, prove one vSphere Agent can join, then expand to the full NodePool and conformance workflow.
